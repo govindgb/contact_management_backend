@@ -1,5 +1,6 @@
 const Contact = require('../models/Contact');
 const xlsx = require('xlsx');
+const { Op } = require('sequelize');
 
 // Upload Contacts
 exports.uploadContacts = async (req, res) => {
@@ -61,12 +62,20 @@ exports.uploadContacts = async (req, res) => {
 exports.getContacts = async (req, res) => {
     try {
         const { page = 1, limit = 10, search } = req.query;
-        const filters = search ? { where: { name: { [Op.like]: `%${search}%` } } } : {};
+
+        // Apply search filter if 'search' query parameter is provided
+        const filters = search
+            ? { where: { name: { [Op.like]: `%${search}%` } } }
+            : {};
+
+        // Fetch contacts with pagination and optional filtering
         const contacts = await Contact.findAndCountAll({
             ...filters,
             offset: (page - 1) * limit,
             limit: parseInt(limit),
         });
+
+        // Return paginated contacts
         res.status(200).json(contacts);
     } catch (error) {
         res.status(500).json({ message: error.message });
