@@ -4,59 +4,70 @@ const { Op } = require('sequelize');
 
 // Upload Contacts
 exports.uploadContacts = async (req, res) => {
-    try {
-        // Check if a file is provided
-        if (!req.file) {
-            return res.status(400).json({ message: 'No file uploaded.' });
+  try {
+    let contactsToSave = [];
+      
+    // **1. Check if an Excel file is uploaded**
+    if (req.file) {
+      const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+      sheetData.forEach((row, index) => {
+        const { Name, Email, Phone } = row;
+
+        // Validation
+        if (!Name || !Email || !Phone) {
+          return res.status(400).json({ message: `Row ${index + 1} has missing fields.` });
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const phoneRegex = /^\d+$/;
+
+        if (!emailRegex.test(Email) || !phoneRegex.test(Phone)) {
+          return res.status(400).json({ message: `Row ${index + 1} has invalid data.` });
         }
 
-        // Parse the uploaded Excel file
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const sheetName = workbook.SheetNames[0];
-        const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
-
-        // Validate data and add to the database
-        const errors = [];
-        const validContacts = [];
-
-        sheetData.forEach((row, index) => {
-            const { Name, Email, Phone } = row;
-
-            // Check for missing fields
-            if (!Name || !Email || !Phone) {
-                errors.push(`Row ${index + 1}: Missing required fields.`);
-                return;
-            }
-
-            // Validate email and phone format
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            const phoneRegex = /^\d+$/;
-
-            if (!emailRegex.test(Email)) {
-                errors.push(`Row ${index + 1}: Invalid email format.`);
-            } else if (!phoneRegex.test(Phone)) {
-                errors.push(`Row ${index + 1}: Invalid phone number.`);
-            } else {
-                validContacts.push({ name: Name, email: Email, phone: Phone });
-            }
+        contactsToSave.push({ name: Name, email: Email, phone: Phone });
+      });
+    } 
+    
+    // **2. Check if JSON data is sent in the request body**
+    else if (req.body && Object.keys(req.body).length > 0) {
+      if (Array.isArray(req.body)) {
+        // **Multiple contacts (Array)**
+        req.body.forEach((contact, index) => {
+          const { name, email, phone } = contact;
+          if (!name || !email || !phone) {
+            return res.status(400).json({ message: `Item ${index + 1} has missing fields.` });
+          }
+          contactsToSave.push({ name, email, phone });
         });
-
-        if (errors.length) {
-            return res.status(400).json({ message: 'Validation errors', errors });
+      } else {
+        // **Single contact (Object)**
+        const { name, email, phone } = req.body;
+        if (!name || !email || !phone) {
+          return res.status(400).json({ message: "Missing required fields." });
         }
-
-        // Bulk insert valid contacts
-        const createdContacts = await Contact.bulkCreate(validContacts);
-
-        res.status(201).json({
-            message: 'Contacts uploaded successfully.',
-            contacts: createdContacts,
-        });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+        contactsToSave.push({ name, email, phone });
+      }
+    } 
+    
+    else {
+      return res.status(400).json({ message: "Invalid request. No data found." });
     }
-};
 
+    // **3. Save contacts to the database**
+    const savedContacts = await Contact.bulkCreate(contactsToSave);
+
+    return res.status(201).json({
+      message: "Contacts uploaded successfully.",
+      contacts: savedContacts,
+    });
+
+  } catch (error) {
+    return res.status(500).json({ message: error.message });
+  }
+};
 
 // Get Contacts with pagination, search, and filtering
 exports.getContacts = async (req, res) => {
